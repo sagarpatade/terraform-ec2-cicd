@@ -12,7 +12,7 @@ cat <<EOF > /usr/share/nginx/html/index.html
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Terraform Nginx Server</title>
+    <title>Terraform Nginx Server with Github Action</title>
 </head>
 
 <body>
