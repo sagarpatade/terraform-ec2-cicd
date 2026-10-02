@@ -33,6 +33,20 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ap-south-1
 
+      - name: Verify Checked Out Code
+        run: |
+          echo "Commit SHA:"
+          git rev-parse HEAD
+
+          echo "Latest commit:"
+          git log -1 --oneline
+
+          echo "Key pair block:"
+          grep -A8 'resource "aws_key_pair"' modules/ec2/main.tf
+
+          echo "Checking old public_key_path:"
+          grep -R --exclude-dir=.terraform "public_key_path" modules environments || true
+
       - name: Terraform Init
         run: terraform -chdir=environments/${{ inputs.environment }} init
 
