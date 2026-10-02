@@ -1,22 +1,25 @@
-name: Terraform CI
+name: Terraform Deploy
 
 on:
-  push:
-    branches:
-      - main
-
-  pull_request:
-    branches:
-      - main
-
   workflow_dispatch:
+    inputs:
+      environment:
+        description: "Select environment"
+        required: true
+        type: choice
+        options:
+          - dev
+          - prod
 
 jobs:
   terraform:
+    name: Terraform - ${{ inputs.environment }}
     runs-on: ubuntu-latest
 
-    steps:
+    env:
+      TF_VAR_public_key: ${{ secrets.EC2_PUBLIC_KEY }}
 
+    steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
@@ -31,24 +34,19 @@ jobs:
           aws-region: ap-south-1
 
       - name: Terraform Init
-        run: terraform init
+        run: terraform -chdir=environments/${{ inputs.environment }} init
 
       - name: Terraform Format Check
-        run: terraform fmt -check -recursive
+        run: terraform -chdir=environments/${{ inputs.environment }} fmt -check
 
       - name: Terraform Validate
-        run: terraform validate
+        run: terraform -chdir=environments/${{ inputs.environment }} validate
 
       - name: Terraform Plan
-        run: terraform plan
-
-      - name: Terraform Plan
-        run: terraform plan -out=tfplan
+        run: terraform -chdir=environments/${{ inputs.environment }} plan -out=tfplan
 
       - name: Terraform Apply
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        run: terraform apply -auto-approve tfplan
+        run: terraform -chdir=environments/${{ inputs.environment }} apply -auto-approve tfplan
 
       - name: Terraform Output
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        run: terraform output
+        run: terraform -chdir=environments/${{ inputs.environment }} output

@@ -1,62 +1,39 @@
-########################################
+############################################
 # Get Default VPC
-########################################
+############################################
 
-data "aws_vpc" "default" {
+data "aws_vpc" "my_vpc" {
   default = true
 }
 
 
-########################################
-# Get Subnets from Default VPC
+############################################
+# Get Available Availability Zones
+############################################
 
-data "aws_subnets" "default" {
-
-  filter {
-    name   = "vpc-id"
-    values = [data.aws_vpc.default.id]
-  }
+data "aws_availability_zones" "available" {
+  state = "available"
 }
 
 
-# Get Latest Amazon Linux 2023 AMI
+############################################
+# Get Default Subnet
+############################################
 
-data "aws_ami" "amazon_linux" {
-
-  most_recent = true
-  owners      = ["amazon"]
-
-  filter {
-    name   = "name"
-    values = ["al2023-ami-2023.*-x86_64"]
-  }
-
-  filter {
-    name   = "architecture"
-    values = ["x86_64"]
-  }
-
-  filter {
-    name   = "root-device-type"
-    values = ["ebs"]
-  }
-
-  filter {
-    name   = "virtualization-type"
-    values = ["hvm"]
-  }
+data "aws_subnet" "default_subnet" {
+  vpc_id            = data.aws_vpc.my_vpc.id
+  availability_zone = data.aws_availability_zones.available.names[0]
+  default_for_az    = true
 }
 
 
-########################################
-# Create AWS Key Pair
-########################################
+############################################
+# Create EC2 Key Pair
+############################################
 
-resource "aws_key_pair" "this" {
-
-  key_name = var.key_name
-
-  public_key = file(var.public_key_path)
+resource "aws_key_pair" "my_key" {
+  key_name   = var.key_name
+  public_key = var.public_key
 
   tags = merge(
     var.tags,
@@ -67,16 +44,44 @@ resource "aws_key_pair" "this" {
 }
 
 
-########################################
+############################################
 # Create Security Group
-########################################
+############################################
 
-resource "aws_security_group" "web" {
-
+resource "aws_security_group" "web_sg" {
   name        = "${var.instance_name}-sg"
-  description = "Security group for Nginx EC2 server"
+  description = "Allow SSH and HTTP"
+  vpc_id      = data.aws_vpc.my_vpc.id
 
-  vpc_id = data.aws_vpc.default.id
+  ingress {
+    description = "Allow SSH"
+
+    from_port = 22
+    to_port   = 22
+    protocol  = "tcp"
+
+    cidr_blocks = var.ssh_cidrs
+  }
+
+  ingress {
+    description = "Allow HTTP"
+
+    from_port = 80
+    to_port   = 80
+    protocol  = "tcp"
+
+    cidr_blocks = var.http_cidrs
+  }
+
+  egress {
+    description = "Allow all outbound traffic"
+
+    from_port = 0
+    to_port   = 0
+    protocol  = "-1"
+
+    cidr_blocks = var.egress_cidrs
+  }
 
   tags = merge(
     var.tags,
@@ -87,86 +92,35 @@ resource "aws_security_group" "web" {
 }
 
 
-########################################
-# Allow SSH Port 22
-########################################
-
-resource "aws_vpc_security_group_ingress_rule" "ssh" {
-
-  security_group_id = aws_security_group.web.id
-
-  description = "Allow SSH"
-
-  cidr_ipv4 = var.ssh_cidr
-
-  from_port = 22
-  to_port   = 22
-
-  ip_protocol = "tcp"
-}
-
-
-########################################
-# Allow HTTP Port 80
-########################################
-
-resource "aws_vpc_security_group_ingress_rule" "http" {
-
-  security_group_id = aws_security_group.web.id
-
-  description = "Allow HTTP"
-
-  cidr_ipv4 = "0.0.0.0/0"
-
-  from_port = 80
-  to_port   = 80
-
-  ip_protocol = "tcp"
-}
-
-
-# Allow All Outbound Traffic
-
-resource "aws_vpc_security_group_egress_rule" "all" {
-
-  security_group_id = aws_security_group.web.id
-
-  cidr_ipv4 = "0.0.0.0/0"
-
-  ip_protocol = "-1"
-}
-
-
+############################################
 # Create EC2 Instance
+############################################
 
-resource "aws_instance" "this" {
-
-  ami = data.aws_ami.amazon_linux.id
-
+resource "aws_instance" "nginx_server" {
+  ami           = var.ami_id
   instance_type = var.instance_type
 
-  subnet_id = sort(data.aws_subnets.default.ids)[0]
+  subnet_id = data.aws_subnet.default_subnet.id
 
   associate_public_ip_address = true
 
-  key_name = aws_key_pair.this.key_name
+  key_name = aws_key_pair.my_key.key_name
 
   vpc_security_group_ids = [
-    aws_security_group.web.id
+    aws_security_group.web_sg.id
   ]
 
   user_data = file("${path.module}/user_data.sh")
 
 
+  ##########################################
   # Root EBS Volume
+  ##########################################
 
   root_block_device {
-
     volume_type = "gp3"
-
-    volume_size = 8
-
-    encrypted = true
+    volume_size = var.root_volume_size
+    encrypted   = true
   }
 
 
@@ -179,16 +133,15 @@ resource "aws_instance" "this" {
 }
 
 
+############################################
 # Create Additional EBS Volume
+############################################
 
 resource "aws_ebs_volume" "data" {
+  availability_zone = aws_instance.nginx_server.availability_zone
 
-  availability_zone = aws_instance.this.availability_zone
-
-  size = var.ebs_size
-
-  type = "gp3"
-
+  size      = var.ebs_size
+  type      = "gp3"
   encrypted = true
 
   tags = merge(
@@ -200,13 +153,14 @@ resource "aws_ebs_volume" "data" {
 }
 
 
-# Attach EBS Volume to EC2
+############################################
+# Attach Additional EBS Volume
+############################################
 
 resource "aws_volume_attachment" "data" {
-
   device_name = "/dev/sdf"
 
   volume_id = aws_ebs_volume.data.id
 
-  instance_id = aws_instance.this.id
+  instance_id = aws_instance.nginx_server.id
 }

@@ -3,8 +3,8 @@
 *.tfstate
 *.tfstate.*
 
-.terraform.lock.hcl
-
 terraform-lab-key
+terraform-lab-key.pub
 
+*.tfplan
 crash.log
